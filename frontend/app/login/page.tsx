@@ -23,10 +23,13 @@ export default function Login() {
                     const expiryDate = new Date();
                     expiryDate.setDate(expiryDate.getDate() + 7); // Expires in 7 days
                     document.cookie = `token=${token}; path=/; secure; samesite=strict; expires=${expiryDate.toUTCString()}`;
+                    return true
                 }).catch(e => {
                     alert(e)
-                }).then(()=>{
-                    redirect('/todo')
+                    return false
+                }).then((success)=>{
+                    if (success)
+                        redirect('/todo')
                 })
             }}>Login</Button>
         </CardFooter>

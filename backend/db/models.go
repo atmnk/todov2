@@ -20,7 +20,7 @@ const (
 func DB() *gorm.DB {
 	if db == nil {
 		var err error
-		if db, err = gorm.Open(sqlite.Open("file:todov2?mode=memory&cache=shared"), &gorm.Config{}); err != nil {
+		if db, err = gorm.Open(sqlite.Open("todov2.sqlite"), &gorm.Config{}); err != nil {
 			panic(err)
 		} else {
 			return db

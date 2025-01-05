@@ -121,7 +121,7 @@ func setupRouter() *gin.Engine {
 		ctx.ShouldBindBodyWithJSON(&todoBody)
 		user := ctx.MustGet("currentUser").(db.User)
 		if todo, e := user.CreateTodo(db.DB(), todoBody.Title); e == nil {
-			ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": todo, "message": "Todo created"})
+			ctx.JSON(http.StatusCreated, gin.H{"status": "success", "data": todo, "message": "Todo created"})
 		} else {
 			ctx.JSON(http.StatusBadRequest, gin.H{"status": "failure", "data": e.Error(), "message": "Bad request"})
 		}
@@ -169,6 +169,5 @@ func GetId(ctx *gin.Context) (uint, error) {
 func main() {
 	db.Migrate(db.DB())
 	r := setupRouter()
-	// Listen and Server in 0.0.0.0:8080
 	r.Run(":8080")
 }
