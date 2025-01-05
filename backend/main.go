@@ -83,7 +83,7 @@ func setupRouter() *gin.Engine {
 		}
 		if e := user.Create(db.DB()); e == nil {
 			if token, err := service.GenerateToken(user); err == nil {
-				ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": token, "message": "User Created"})
+				ctx.JSON(http.StatusCreated, gin.H{"status": "success", "data": token, "message": "User Created"})
 			} else {
 				ctx.JSON(http.StatusInternalServerError, gin.H{"status": "failure", "data": err.Error(), "message": "Internal server error"})
 			}
