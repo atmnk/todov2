@@ -47,6 +47,21 @@ type Todo struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
+type UpdateTodo struct {
+	Title  *string     `json:"title"`
+	Status *TodoStatus `json:"status"`
+}
+
+func (todo UpdateTodo) Validate() error {
+	if todo.Status == nil && todo.Title == nil {
+		return fmt.Errorf("atleast one field must be upodated")
+	} else if todo.Status != nil && !(*todo.Status == StatusActive || *todo.Status == StatusDone) {
+		return fmt.Errorf("invalid status")
+	} else if todo.Title != nil && *todo.Title == "" {
+		return fmt.Errorf("title must not be empty")
+	}
+	return nil
+}
 
 func Migrate(db *gorm.DB) {
 	db.AutoMigrate(&User{}, &Todo{})
@@ -77,6 +92,32 @@ func (user *User) CreateTodo(db *gorm.DB, title string) (*Todo, error) {
 	} else {
 		return nil, e
 	}
+}
+func (user *User) DeleteTodo(db *gorm.DB, id uint) error {
+	return db.Model(&Todo{}).Delete(&Todo{Id: id}, "user_id = ? ", user.Id).Error
+}
+func (user *User) UpdateTodo(dbb *gorm.DB, id uint, todoBody UpdateTodo) (*Todo, error) {
+	var todo *Todo = &Todo{Id: id}
+	if e := dbb.Transaction(func(db *gorm.DB) error {
+		if e := db.Model(&Todo{Id: id}).Where("user_id = ?", user.Id).UpdateColumns(todoBody).Error; e == nil {
+			if e := db.First(todo, "id = ?", id).Error; e == nil {
+				if todo.UserId == user.Id {
+					return nil
+				} else {
+					return fmt.Errorf("not found")
+				}
+			} else {
+				return e
+			}
+		} else {
+			return e
+		}
+	}); e == nil {
+		return todo, nil
+	} else {
+		return nil, e
+	}
+
 }
 func (user *User) Login(db *gorm.DB) error {
 	if e := db.Model(user).First(user, "username = ? AND password = ?", user.Username, user.Password).Error; e != nil {
