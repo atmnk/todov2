@@ -11,8 +11,12 @@ export async function deleteTodo(id:number){
         method:'DELETE',
     })
 }
-export async function getAllTodos(){
-    const resp=await fetch(`${getBaseURL()}/todo`)
+export async function getAllTodos(token:string){
+    const resp=await fetch(`${getBaseURL()}/todo`,{
+        headers:{
+            'Authorization':`Bearer ${token}`
+        }
+    })
     const data=await resp.json()
     return data.data;
 }
