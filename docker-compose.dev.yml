@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: frontend
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "3000:3000" # Map appropriate ports
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: backend
+    environment:
+      - GO_ENV=development
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8080:8080" # Map appropriate ports
+    restart: always
+  
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "3001:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - frontend
+      - backend

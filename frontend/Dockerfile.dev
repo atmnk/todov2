@@ -1,0 +1,15 @@
+# Stage: Development Environment
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm install
+
+# Expose the development server port
+EXPOSE 3000
+
+# Start the Next.js app in development mode with hot reload
+CMD ["npm", "run", "dev"]
