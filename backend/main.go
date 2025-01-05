@@ -4,18 +4,43 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/qalens/todov2/db"
+	"github.com/qalens/todov2/service"
 )
 
-type TodoStatus string
+func Authorize(ctx *gin.Context) {
+	var token string
+	cookie, err := ctx.Cookie("token")
 
-const (
-	StatusActive TodoStatus = "Active"
-	StatusDone   TodoStatus = "Done"
-)
+	authorizationHeader := ctx.Request.Header.Get("Authorization")
+	fields := strings.Fields(authorizationHeader)
 
+	if len(fields) != 0 && fields[0] == "Bearer" {
+		token = fields[1]
+	} else if err == nil {
+		token = cookie
+	}
+
+	if token == "" {
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "fail", "message": "Unauthorized: " + err.Error()})
+		return
+	}
+
+	claims, err := service.ValidateToken(token)
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "fail", "message": err.Error()})
+		return
+	}
+	ctx.Set("currentUser", db.User{
+		Id:       uint(claims["id"].(float64)),
+		Username: claims["username"].(string),
+	})
+	ctx.Set("claims", claims)
+	ctx.Next()
+}
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -32,22 +57,17 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 }
 
-// var db = make(map[string]string)
-type Todo struct {
-	Id     uint       `json:"id"`
-	Title  string     `json:"title"`
-	Status TodoStatus `json:"status"`
-}
 type CreateTodo struct {
 	Title string `json:"title"`
 }
-type UpdateTodo struct {
-	Title  *string     `json:"title"`
-	Status *TodoStatus `json:"status"`
+type CreateUser struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
-
-var db = make(map[uint]Todo)
-var mu sync.Mutex
+type UpdateTodo struct {
+	Title  *string        `json:"title"`
+	Status *db.TodoStatus `json:"status"`
+}
 
 func setupRouter() *gin.Engine {
 	// Disable Console Color
@@ -58,74 +78,125 @@ func setupRouter() *gin.Engine {
 	// r.GET("/ping", func(c *gin.Context) {
 	// 	c.String(http.StatusOK, "pong")
 	// })
-	r.GET("/todo", func(ctx *gin.Context) {
-		resp := []Todo{}
-		mu.Lock()
-		for _, todo := range db {
-			resp = append(resp, todo)
+	r.POST("/user", func(ctx *gin.Context) {
+		var createUserBody CreateUser
+		ctx.ShouldBindBodyWithJSON(&createUserBody)
+		user := &db.User{
+			Username: createUserBody.Username,
+			Password: createUserBody.Password,
 		}
-		mu.Unlock()
-		ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": resp, "message": "success"})
+		if e := user.Create(db.DB()); e == nil {
+			if token, err := service.GenerateToken(user); err == nil {
+				ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": token, "message": "User Created"})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"status": "failure", "data": err.Error(), "message": "Internal server error"})
+			}
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "failure", "data": e.Error(), "message": "Bad request"})
+		}
 	})
-	r.POST("/todo", func(ctx *gin.Context) {
+	r.POST("/user/login", func(ctx *gin.Context) {
+		var createUserBody CreateUser
+		ctx.ShouldBindBodyWithJSON(&createUserBody)
+		user := &db.User{
+			Username: createUserBody.Username,
+			Password: createUserBody.Password,
+		}
+		if e := user.Login(db.DB()); e == nil {
+			if token, err := service.GenerateToken(user); err == nil {
+				ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": token, "message": "User logged in"})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"status": "failure", "data": err.Error(), "message": "Internal server error"})
+			}
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "failure", "data": e.Error(), "message": "Bad request"})
+		}
+	})
+	r.GET("/todo", Authorize, func(ctx *gin.Context) {
+		user := ctx.MustGet("currentUser").(db.User)
+		if todos, e := user.GetTodos(db.DB()); e == nil {
+			ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": todos, "message": "success"})
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "failure", "data": e.Error(), "message": "Bad request"})
+		}
+	})
+	r.POST("/todo", Authorize, func(ctx *gin.Context) {
 		var todoBody CreateTodo
 		ctx.ShouldBindBodyWithJSON(&todoBody)
-		mu.Lock()
-		var maxKey uint = 0
-		for key := range db {
-			if maxKey < key {
-				maxKey = key
-			}
-		}
-		maxKey = maxKey + 1
-		todo := Todo{
-			Id:     maxKey,
-			Title:  todoBody.Title,
-			Status: StatusActive,
-		}
-		db[todo.Id] = todo
-		mu.Unlock()
-		ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": todo, "message": "Todo Created"})
-	})
-	r.PATCH("/todo/:id", func(ctx *gin.Context) {
-		if Id, e := GetId(ctx); e == nil {
-			var todoBody UpdateTodo
-			if e := ctx.ShouldBindBodyWithJSON(&todoBody); e == nil {
-				mu.Lock()
-				original := db[Id]
-				title := original.Title
-				status := original.Status
-				if todoBody.Title != nil {
-					title = *todoBody.Title
-				}
-				if todoBody.Status != nil {
-					status = *todoBody.Status
-				}
-				newTodo := Todo{
-					Id:     Id,
-					Title:  title,
-					Status: status,
-				}
-				db[Id] = newTodo
-				mu.Unlock()
-				ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": newTodo, "message": "Todo Updated"})
-			} else {
-				ctx.JSON(http.StatusBadRequest, gin.H{"status": "bad request", "message": e.Error()})
-			}
+		user := ctx.MustGet("currentUser").(db.User)
+		if todo, e := user.CreateTodo(db.DB(), todoBody.Title); e == nil {
+			ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": todo, "message": "Todo created"})
 		} else {
-			ctx.JSON(http.StatusBadRequest, gin.H{"status": "bad request", "message": e.Error()})
+			ctx.JSON(http.StatusBadRequest, gin.H{"status": "failure", "data": e.Error(), "message": "Bad request"})
 		}
+	})
+	// 	resp := []Todo{}
+	// 	mu.Lock()
+	// 	for _, todo := range db {
+	// 		resp = append(resp, todo)
+	// 	}
+	// 	mu.Unlock()
+	// 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": resp, "message": "success"})
+	// })
+	// r.POST("/todo", func(ctx *gin.Context) {
+	// 	var todoBody CreateTodo
+	// 	ctx.ShouldBindBodyWithJSON(&todoBody)
+	// 	mu.Lock()
+	// 	var maxKey uint = 0
+	// 	for key := range db {
+	// 		if maxKey < key {
+	// 			maxKey = key
+	// 		}
+	// 	}
+	// 	maxKey = maxKey + 1
+	// 	todo := Todo{
+	// 		Id:     maxKey,
+	// 		Title:  todoBody.Title,
+	// 		Status: StatusActive,
+	// 	}
+	// 	db[todo.Id] = todo
+	// 	mu.Unlock()
+	// 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": todo, "message": "Todo Created"})
+	// })
+	r.PATCH("/todo/:id", func(ctx *gin.Context) {
+		// if Id, e := GetId(ctx); e == nil {
+		// 	var todoBody UpdateTodo
+		// 	if e := ctx.ShouldBindBodyWithJSON(&todoBody); e == nil {
+		// 		mu.Lock()
+		// 		original := db[Id]
+		// 		title := original.Title
+		// 		status := original.Status
+		// 		if todoBody.Title != nil {
+		// 			title = *todoBody.Title
+		// 		}
+		// 		if todoBody.Status != nil {
+		// 			status = *todoBody.Status
+		// 		}
+		// 		newTodo := Todo{
+		// 			Id:     Id,
+		// 			Title:  title,
+		// 			Status: status,
+		// 		}
+		// 		db[Id] = newTodo
+		// 		mu.Unlock()
+		// 		ctx.JSON(http.StatusOK, gin.H{"status": "success", "data": newTodo, "message": "Todo Updated"})
+		// 	} else {
+		// 		ctx.JSON(http.StatusBadRequest, gin.H{"status": "bad request", "message": e.Error()})
+		// 	}
+		// } else {
+		// 	ctx.JSON(http.StatusBadRequest, gin.H{"status": "bad request", "message": e.Error()})
+		// }
 	})
 	r.DELETE("/todo/:id", func(ctx *gin.Context) {
-		if Id, e := GetId(ctx); e == nil {
+		// if Id, e := GetId(ctx); e == nil {
 
-			mu.Lock()
-			delete(db, Id)
-			mu.Unlock()
-			ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": "Todo Deleted"})
-		} else {
-			ctx.JSON(http.StatusBadRequest, gin.H{"status": "bad request", "message": e.Error()})
-		}
+		// 	mu.Lock()
+		// 	delete(db, Id)
+		// 	mu.Unlock()
+		// 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": "Todo Deleted"})
+		// } else {
+		// 	ctx.JSON(http.StatusBadRequest, gin.H{"status": "bad request", "message": e.Error()})
+		// }
 
 	})
 
@@ -186,6 +257,7 @@ func GetId(ctx *gin.Context) (uint, error) {
 	}
 }
 func main() {
+	db.Migrate(db.DB())
 	r := setupRouter()
 	// Listen and Server in 0.0.0.0:8080
 	r.Run(":8080")
