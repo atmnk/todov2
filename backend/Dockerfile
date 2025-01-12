@@ -8,4 +8,4 @@ RUN apk add --no-cache gcc musl-dev
 RUN go mod download
 RUN go build -ldflags='-s -w -extldflags "-static"' -o main main.go
 
-CMD ["./main"] ⁠
+CMD ["./main"]
